@@ -1,0 +1,13 @@
+{
+  "name": "rockpaper-weekly-report-downloader",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Rockpaper weekly report Excel downloader",
+  "scripts": {
+    "download": "node scripts/download-rockpaper-weekly.js"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "playwright": "^1.49.0"
+  }
+}
