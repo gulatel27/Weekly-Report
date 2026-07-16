@@ -22,6 +22,10 @@ DEFAULT_LLM_CONFIG = Path("config/llm.local.json")
 TIME_LABELS = ["주간", "야간", "심야", "휴일", "총합계"]
 KIND_LABELS = ["설치", "지원", "점검", "Presales", "파견"]
 LLM_USAGE_TOTALS = {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+ISSUE_ROW_WRAP_UNITS = 190
+ISSUE_ROW_BASE_HEIGHT = 18
+ISSUE_ROW_MAX_HEIGHT = 240
+ISSUE_HIGHLIGHT_COLOR = "FF0000"
 
 
 def log(message: str) -> None:
@@ -169,12 +173,12 @@ def clear_whitespace_values(ws) -> None:
 def find_section_rows(ws) -> dict[int, int]:
     sections: dict[int, int] = {}
     patterns = {
-        1: re.compile(r"^\s*1\."),
-        2: re.compile(r"^\s*2[\.,]"),
-        3: re.compile(r"^\s*3[\.,]"),
-        4: re.compile(r"^\s*4\."),
-        5: re.compile(r"^\s*5\."),
-        6: re.compile(r"^\s*6\."),
+        1: re.compile(r"^\s*1[\.,](?=\s|$)"),
+        2: re.compile(r"^\s*2[\.,](?=\s|$)"),
+        3: re.compile(r"^\s*3[\.,](?=\s|$)"),
+        4: re.compile(r"^\s*4[\.,](?=\s|$)"),
+        5: re.compile(r"^\s*5[\.,](?=\s|$)"),
+        6: re.compile(r"^\s*6[\.,](?=\s|$)"),
     }
     for row in range(1, ws.max_row + 1):
         value = ws.cell(row, 1).value
@@ -504,14 +508,14 @@ def parse_detail_sections(detail: str) -> dict[str, list[str]]:
     return sections
 
 
-def shorten_issue_text(value: str, max_chars: int = 95) -> str:
+def shorten_issue_text(value: str, max_chars: int | None = None) -> str:
     text = clean_issue_text(value)
-    if len(text) > max_chars:
+    if max_chars is not None and len(text) > max_chars:
         text = text[: max_chars - 3].rstrip() + "..."
     return text
 
 
-def compact_issue_values(values: list[str], max_items: int = 2, max_chars: int = 95) -> str:
+def compact_issue_values(values: list[str], max_items: int = 2, max_chars: int | None = None) -> str:
     selected = []
     for value in values:
         text = shorten_issue_text(value, max_chars=max_chars)
@@ -524,7 +528,7 @@ def compact_issue_values(values: list[str], max_items: int = 2, max_chars: int =
         return ""
 
     compacted = " / ".join(selected)
-    if len(compacted) > max_chars:
+    if max_chars is not None and len(compacted) > max_chars:
         compacted = compacted[: max_chars - 3].rstrip() + "..."
     return compacted
 
@@ -590,6 +594,54 @@ def grouped_issue_records(issue_records: list[dict]) -> list[dict]:
             group["engineers"].append(engineer)
         group["records"].append(record)
     return groups
+
+
+def format_issue_date(start_at: dt.datetime | None) -> str:
+    if not start_at:
+        return ""
+    return f"{start_at.month}/{start_at.day}"
+
+
+def issue_group_date_text(group: dict) -> str:
+    dates = []
+    seen = set()
+    for record in group["records"]:
+        start_at = record.get("작업시작일시")
+        if not start_at:
+            continue
+        key = start_at.date()
+        if key in seen:
+            continue
+        seen.add(key)
+        dates.append(key)
+    dates.sort()
+    return ", ".join(f"{date.month}/{date.day}" for date in dates)
+
+
+def issue_header_text(group: dict) -> str:
+    engineers = ",".join(group["engineers"])
+    date_text = issue_group_date_text(group)
+    suffix = f" - {date_text}" if date_text else ""
+    return f"- {group['customer']} ({engineers}){suffix}"
+
+
+def issue_text_units(text: str) -> int:
+    return sum(2 if ord(char) > 127 else 1 for char in str(text or ""))
+
+
+def estimate_issue_row_height(text: str) -> float:
+    if not text:
+        return ISSUE_ROW_BASE_HEIGHT
+    units = issue_text_units(text)
+    visual_lines = max(1, (units + ISSUE_ROW_WRAP_UNITS - 1) // ISSUE_ROW_WRAP_UNITS)
+    explicit_lines = str(text).count("\n") + 1
+    line_count = max(visual_lines, explicit_lines)
+    return min(ISSUE_ROW_MAX_HEIGHT, max(ISSUE_ROW_BASE_HEIGHT, ISSUE_ROW_BASE_HEIGHT * line_count))
+
+
+def is_issue_highlight_line(text: str) -> bool:
+    line = re.sub(r"^[\s.ㆍ·\-]+", "", str(text or "").strip())
+    return bool(re.match(r"^(요청|요청/이슈|요청사항|조치|조치사항)\s*[:：]", line))
 
 
 def truncate_text(value: str, max_chars: int = 1400) -> str:
@@ -1125,7 +1177,7 @@ def write_issue_rows(
 
     for group in grouped_issue_records(issue_records):
         engineers = ",".join(group["engineers"])
-        output_lines.append((f"- {group['customer']} ({engineers})", True))
+        output_lines.append((issue_header_text(group), True))
         detail_lines = llm_issue_detail_lines(group, llm_config)
         used_local_summary = detail_lines is None
         if detail_lines is None:
@@ -1163,6 +1215,7 @@ def write_issue_rows(
         row = first_content_row + offset
         cell = ws.cell(row, 1)
         cell.value = text
+        ws.row_dimensions[row].height = estimate_issue_row_height(text)
         alignment = copy.copy(ws.cell(first_content_row, 1).alignment)
         alignment.wrap_text = True
         cell.alignment = alignment
@@ -1171,7 +1224,10 @@ def write_issue_rows(
             font.bold = True
             cell.font = font
         else:
-            cell.font = copy.copy(ws.cell(first_content_row, 1).font)
+            font = copy.copy(ws.cell(first_content_row, 1).font)
+            if is_issue_highlight_line(text):
+                font.color = ISSUE_HIGHLIGHT_COLOR
+            cell.font = font
 
     clear_section_horizontal_borders(ws, first_content_row, section3_row - 1)
 
@@ -1194,9 +1250,39 @@ def ensure_presales_rows(ws, header_row: int, section5_row: int, needed_rows: in
     return section5_row + extra_rows
 
 
+def remove_merged_range_safely(ws, merged_range) -> None:
+    coord = str(merged_range)
+    min_row = merged_range.min_row
+    min_col = merged_range.min_col
+    max_row = merged_range.max_row
+    max_col = merged_range.max_col
+    try:
+        ws.unmerge_cells(coord)
+    except KeyError:
+        pass
+
+    for existing_range in list(ws.merged_cells.ranges):
+        if str(existing_range) == coord:
+            ws.merged_cells.ranges.remove(existing_range)
+
+    for cleanup_row in range(min_row, max_row + 1):
+        for cleanup_col in range(min_col, max_col + 1):
+            key = (cleanup_row, cleanup_col)
+            if isinstance(ws._cells.get(key), MergedCell):
+                del ws._cells[key]
+
+
+def reset_presales_data_row_merges(ws, row: int) -> None:
+    for merged_range in list(ws.merged_cells.ranges):
+        if merged_range.min_row <= row <= merged_range.max_row:
+            remove_merged_range_safely(ws, merged_range)
+    ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=6)
+
+
 def write_presales_rows(ws, header_row: int, section5_row: int, presales_records: list[dict]) -> None:
     section5_row = ensure_presales_rows(ws, header_row, section5_row, len(presales_records))
     for row in range(header_row + 1, section5_row):
+        reset_presales_data_row_merges(ws, row)
         clear_row(ws, row)
 
     for index, record in enumerate(presales_records, start=header_row + 1):
