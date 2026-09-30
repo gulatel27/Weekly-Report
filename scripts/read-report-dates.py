@@ -23,7 +23,7 @@ def prompt_summary_mode() -> str:
     print()
     print("요약 방식을 선택하세요.")
     print("1. LLM 요약 사용")
-    print("2. 로컬 요약 사용")
+    print("2. 상세내용 기반 출력 (LLM 미사용)")
     while True:
         choice = input("번호를 입력하세요 (1/2): ").strip()
         if choice == "1":
@@ -70,7 +70,7 @@ def main() -> int:
 
     write_env_file(args.env_file, start_date, end_date, summary_mode)
     print(f"조회 기간: {start_date:%Y-%m-%d} ~ {end_date:%Y-%m-%d}")
-    print(f"요약 방식: {'LLM 요약' if summary_mode == 'llm' else '로컬 요약'}")
+    print(f"요약 방식: {'LLM 요약' if summary_mode == 'llm' else '상세내용 기반 출력'}")
     return 0
 
 

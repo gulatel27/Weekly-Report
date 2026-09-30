@@ -22,7 +22,7 @@ run-final.bat
 
 요약 방식을 선택하세요.
 1. LLM 요약 사용
-2. 로컬 요약 사용
+2. 상세내용 기반 출력 (LLM 미사용)
 번호를 입력하세요 (1/2):
 ```
 
@@ -73,7 +73,7 @@ copy config\llm.example.json config\llm.local.json
 }
 ```
 
-LLM 호출이 실패하면 로컬 요약으로 자동 전환됩니다. 실행 중에는 사용 토큰과 rate limit 잔여 정보도 출력합니다.
+LLM 호출이 실패하면 `상세내용` 기반 상세 항목 출력으로 자동 전환됩니다. 실행 중에는 사용 토큰과 rate limit 잔여 정보도 출력합니다.
 
 ## SharePoint 파일 만들기
 

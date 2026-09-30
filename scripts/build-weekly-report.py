@@ -26,6 +26,12 @@ ISSUE_ROW_WRAP_UNITS = 190
 ISSUE_ROW_BASE_HEIGHT = 18
 ISSUE_ROW_MAX_HEIGHT = 240
 ISSUE_HIGHLIGHT_COLOR = "FF0000"
+DETAIL_CONTINUATION_PREFIX = "               "
+DETAIL_WRAP_UNITS = 120
+DETAIL_SECTION_ORDER = ["지원 내용", "구성", "요청/이슈", "원인", "조치", "기타", "요약"]
+DETAIL_LABEL_PATTERN = re.compile(
+    r"^(지원\s*내용|구성|요청/이슈|요청사항|원인|조치|조치사항|기타|요약)\s*[:：]\s*(.*)$"
+)
 
 
 def log(message: str) -> None:
@@ -54,16 +60,16 @@ def parse_date_arg(value: str | None) -> dt.date | None:
 def load_llm_config(config_path: Path | None = None) -> dict | None:
     summary_mode = str(os.environ.get("REPORT_SUMMARY_MODE") or "").strip().lower()
     if summary_mode in {"local", "2"}:
-        log("요약 방식 선택: 로컬 요약을 사용합니다. LLM API는 호출하지 않습니다.")
+        log("요약 방식 선택: 상세내용 기반 출력을 사용합니다. LLM API는 호출하지 않습니다.")
         return None
     if summary_mode and summary_mode not in {"llm", "1"}:
-        log(f"알 수 없는 요약 방식이라 로컬 요약을 사용합니다: {summary_mode}")
+        log(f"알 수 없는 요약 방식이라 상세내용 기반 출력을 사용합니다: {summary_mode}")
         return None
 
     raw_path = config_path or Path(os.environ.get("LLM_CONFIG_PATH") or DEFAULT_LLM_CONFIG)
     if not raw_path.exists():
         if summary_mode in {"llm", "1"}:
-            log(f"LLM 요약을 선택했지만 설정 파일이 없어 로컬 요약을 사용합니다: {raw_path}")
+            log(f"LLM 요약을 선택했지만 설정 파일이 없어 상세내용 기반 출력을 사용합니다: {raw_path}")
         return None
     with raw_path.open("r", encoding="utf-8-sig") as file:
         config = json.load(file)
@@ -71,11 +77,11 @@ def load_llm_config(config_path: Path | None = None) -> dict | None:
         return None
     api_key = str(config.get("api_key") or os.environ.get("OPENAI_API_KEY") or "").strip()
     if not api_key:
-        log(f"LLM 설정 파일은 있으나 api_key가 비어 있어 로컬 요약을 사용합니다: {raw_path}")
+        log(f"LLM 설정 파일은 있으나 api_key가 비어 있어 상세내용 기반 출력을 사용합니다: {raw_path}")
         return None
     provider = str(config.get("provider") or "").strip().lower()
     if provider != "openai":
-        log(f"지원하지 않는 LLM provider라 로컬 요약을 사용합니다: {provider}")
+        log(f"지원하지 않는 LLM provider라 상세내용 기반 출력을 사용합니다: {provider}")
         return None
     config["api_key"] = api_key
     config["provider"] = provider
@@ -452,10 +458,7 @@ def clean_issue_text(raw_line: str) -> str:
 
 
 def is_meaningful_issue_text(line: str) -> bool:
-    normalized = re.sub(r"\s+", "", line).strip().upper()
-    if not normalized or normalized in {"N/A", "NA", "NO", "없음", "해당없음"}:
-        return False
-    return not re.fullmatch(r"[가-힣A-Za-z0-9 /_-]{1,30}\s*[:：]", line)
+    return bool(str(line or "").strip())
 
 
 def detail_label(raw_label: str) -> str | None:
@@ -466,11 +469,14 @@ def detail_label(raw_label: str) -> str | None:
         "이슈사항or요청사항": "요청/이슈",
         "이슈사항": "요청/이슈",
         "요청사항": "요청/이슈",
+        "요청/이슈": "요청/이슈",
+        "요청": "요청/이슈",
         "원인": "원인",
         "조치사항": "조치",
         "조치": "조치",
         "기타특이사항": "기타",
         "특이사항": "기타",
+        "기타": "기타",
     }
     return aliases.get(normalized)
 
@@ -533,7 +539,7 @@ def compact_issue_values(values: list[str], max_items: int = 2, max_chars: int |
     return compacted
 
 
-def issue_detail_lines(record: dict, max_lines: int = 5) -> list[str]:
+def issue_detail_lines(record: dict, max_lines: int | None = None) -> list[str]:
     support = extract_support_content(record["지원내역"])
     sections = parse_detail_sections(record["상세내용"])
     lines = []
@@ -541,32 +547,116 @@ def issue_detail_lines(record: dict, max_lines: int = 5) -> list[str]:
     if support:
         lines.append(f"지원 내용 : {shorten_issue_text(support)}")
 
-    if not support and sections.get("지원 내용"):
-        support_from_detail = compact_issue_values(sections["지원 내용"], max_items=1)
-        if support_from_detail:
-            lines.append(f"지원 내용 : {support_from_detail}")
+    def append_section_values(label: str, values: list[str]) -> None:
+        cleaned_values = []
+        for value in values:
+            text = shorten_issue_text(value)
+            if is_meaningful_issue_text(text):
+                cleaned_values.append(text)
+        if not cleaned_values:
+            return
+        lines.append(f"{label} : {cleaned_values[0]}")
+        lines.extend(f"{DETAIL_CONTINUATION_PREFIX}{text}" for text in cleaned_values[1:])
+
+    append_section_values("지원 내용", sections.get("지원 내용", []))
+    append_section_values("지원 내용", sections.get("개요", []))
 
     for label in ("구성", "요청/이슈", "원인", "조치", "기타"):
-        value = compact_issue_values(sections.get(label, []))
-        if value:
-            lines.append(f"{label} : {value}")
+        append_section_values(label, sections.get(label, []))
 
-    if len(lines) == 1 and sections.get("개요"):
-        value = compact_issue_values(sections["개요"], max_items=2)
-        if value and normalize_issue_key(value) != normalize_issue_key(support):
-            lines.append(f"요약 : {value}")
+    # Deduplicate only within each section in grouped_detail_lines.
+    if lines:
+        return lines
 
-    deduped = []
-    seen = set()
-    for line in lines:
-        key = normalize_issue_key(line)
-        if key in seen:
+    detail = str(record.get("상세내용") or "").strip()
+    fallback_lines = [line.strip() for line in detail.splitlines() if line.strip()]
+    return fallback_lines or ([support] if support else [])
+
+
+def wrap_detail_value(value: str, max_units: int = DETAIL_WRAP_UNITS) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    if issue_text_units(text) <= max_units:
+        return [text]
+
+    chunks = []
+    current = ""
+    for token in re.findall(r"\s+|[^\s]+", text):
+        candidate = current + token
+        if current and issue_text_units(candidate.rstrip()) > max_units:
+            chunks.append(current.rstrip())
+            current = token.lstrip()
+        else:
+            current = candidate
+    if current.strip():
+        chunks.append(current.strip())
+
+    result = []
+    for chunk in chunks:
+        while issue_text_units(chunk) > max_units:
+            cut = 0
+            units = 0
+            for index, char in enumerate(chunk):
+                next_units = 2 if ord(char) > 127 else 1
+                if units + next_units > max_units:
+                    break
+                units += next_units
+                cut = index + 1
+            if not cut:
+                break
+            result.append(chunk[:cut].rstrip())
+            chunk = chunk[cut:].lstrip()
+        if chunk:
+            result.append(chunk)
+    return result
+
+
+def grouped_detail_lines(records: list[dict]) -> list[str]:
+    values_by_section = {label: [] for label in DETAIL_SECTION_ORDER}
+    seen_by_section = {label: set() for label in DETAIL_SECTION_ORDER}
+
+    for record in records:
+        current_section = "기타"
+        for raw_line in issue_detail_lines(record, max_lines=None):
+            line = str(raw_line or "")
+            if line.startswith(DETAIL_CONTINUATION_PREFIX):
+                section = current_section
+                value = line[len(DETAIL_CONTINUATION_PREFIX):].strip()
+            else:
+                match = DETAIL_LABEL_PATTERN.match(line.strip())
+                if match:
+                    section = match.group(1).replace("요청사항", "요청/이슈").replace("조치사항", "조치")
+                    section = re.sub(r"\s+", " ", section).strip()
+                    value = match.group(2).strip()
+                    current_section = section
+                else:
+                    section = current_section or "기타"
+                    value = line.strip()
+
+            if section not in values_by_section:
+                section = "기타"
+            if not is_meaningful_issue_text(value):
+                continue
+            key = normalize_issue_key(value)
+            if key in seen_by_section[section]:
+                continue
+            seen_by_section[section].add(key)
+            values_by_section[section].append(value)
+
+    output = []
+    for section in DETAIL_SECTION_ORDER:
+        values = values_by_section[section]
+        if not values:
             continue
-        seen.add(key)
-        deduped.append(line)
-        if len(deduped) >= max_lines:
-            break
-    return deduped or summarize_detail(record["상세내용"], support, max_lines=max_lines)
+        wrapped_values = []
+        for value in values:
+            wrapped_values.extend(wrap_detail_value(value))
+        if not wrapped_values:
+            continue
+        output.append(f"{section} : {wrapped_values[0]}")
+        output.extend(f"{DETAIL_CONTINUATION_PREFIX}{value}" for value in wrapped_values[1:])
+    return output
 
 
 def grouped_issue_records(issue_records: list[dict]) -> list[dict]:
@@ -641,7 +731,7 @@ def estimate_issue_row_height(text: str) -> float:
 
 def is_issue_highlight_line(text: str) -> bool:
     line = re.sub(r"^[\s.ㆍ·\-]+", "", str(text or "").strip())
-    return bool(re.match(r"^(요청|요청/이슈|요청사항|조치|조치사항)\s*[:：]", line))
+    return bool(re.match(r"^(요청|요청/이슈|요청사항|원인|조치|조치사항|기타)\s*[:：]", line))
 
 
 def truncate_text(value: str, max_chars: int = 1400) -> str:
@@ -799,7 +889,7 @@ def llm_issue_detail_lines(group: dict, llm_config: dict | None) -> list[str] | 
         lines = parse_llm_lines(content)
         return lines or None
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, KeyError, ValueError, json.JSONDecodeError) as error:
-        log(f"LLM 요약 실패. 이번 실행에서는 로컬 요약으로 전환합니다: {describe_llm_error(error)}")
+        log(f"LLM 요약 실패. 이번 실행에서는 상세내용 기반 출력으로 전환합니다: {describe_llm_error(error)}")
         llm_config["_disabled_after_error"] = True
         return None
 
@@ -1168,39 +1258,31 @@ def write_issue_rows(
     llm_config: dict | None = None,
 ) -> None:
     first_content_row = section2_row + 1
-    output_lines: list[tuple[str, bool]] = []
+    output_lines: list[tuple[str, bool, bool]] = []
 
     if issue_records:
-        output_lines.append(("", False))
+        output_lines.append(("", False, False))
     else:
-        output_lines.append(("", False))
+        output_lines.append(("", False, False))
 
     for group in grouped_issue_records(issue_records):
         engineers = ",".join(group["engineers"])
-        output_lines.append((issue_header_text(group), True))
+        output_lines.append((issue_header_text(group), True, False))
         detail_lines = llm_issue_detail_lines(group, llm_config)
         used_local_summary = detail_lines is None
         if detail_lines is None:
-            detail_lines = []
-            seen = set()
-            for record in group["records"]:
-                for line in issue_detail_lines(record):
-                    key = normalize_issue_key(line)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    detail_lines.append(line)
-                    if len(detail_lines) >= 5:
-                        break
-                if len(detail_lines) >= 5:
-                    break
+            detail_lines = grouped_detail_lines(group["records"])
         if used_local_summary and llm_config and llm_config.get("_disabled_after_error"):
-            log(f"로컬 요약 사용: {group['customer']} ({engineers})")
+            log(f"LLM 실패 후 상세내용 기반 출력 사용: {group['customer']} ({engineers})")
             for line in detail_lines:
                 log(f"  - {line}")
+        detail_highlight = False
         for line in detail_lines:
-            output_lines.append((f"     . {line}", False))
-        output_lines.append(("", False))
+            if not line.startswith(DETAIL_CONTINUATION_PREFIX):
+                detail_highlight = is_issue_highlight_line(line)
+            output_text = f"     {line}" if line.startswith(DETAIL_CONTINUATION_PREFIX) else f"     . {line}"
+            output_lines.append((output_text, False, detail_highlight))
+        output_lines.append(("", False, False))
 
     tail_snapshot = snapshot_tail(ws, section3_row)
     section3_row = resize_section_rows(ws, section3_row, first_content_row, len(output_lines))
@@ -1211,7 +1293,7 @@ def write_issue_rows(
         ws.cell(row, 1).font = copy.copy(ws.cell(first_content_row, 1).font)
         ws.row_dimensions[row].height = 18
 
-    for offset, (text, is_header) in enumerate(output_lines):
+    for offset, (text, is_header, is_highlight) in enumerate(output_lines):
         row = first_content_row + offset
         cell = ws.cell(row, 1)
         cell.value = text
@@ -1225,7 +1307,7 @@ def write_issue_rows(
             cell.font = font
         else:
             font = copy.copy(ws.cell(first_content_row, 1).font)
-            if is_issue_highlight_line(text):
+            if is_highlight:
                 font.color = ISSUE_HIGHLIGHT_COLOR
             cell.font = font
 
@@ -1342,6 +1424,13 @@ def populate_report(wb, records: list[dict]) -> dict:
         raise ValueError("Presales 지원사항 헤더 행을 찾지 못했습니다.")
     write_presales_rows(ws, presales_header_row, sections[5], presales_records)
     apply_middle_vertical_alignment(ws)
+    # Keep counts numeric; preformat prose and blank editing cells as text.
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value is None or isinstance(cell.value, str):
+                cell.number_format = "@"
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
     apply_report_outer_border(ws)
     sections = find_section_rows(ws)
     clear_section_horizontal_borders(ws, sections[2] + 1, sections[3] - 1)

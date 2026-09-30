@@ -491,14 +491,19 @@ async function downloadExcel(page, start, end) {
     return url.toString();
   }, { start, end, department: DEPARTMENT });
   log(`엑셀 다운로드 URL: ${exportUrl}`);
-  const downloadPromise = page.waitForEvent("download", { timeout: 60 * 1000 });
-  await page.evaluate((url) => {
-    window.location.href = url;
-  }, exportUrl);
-  const download = await downloadPromise;
-  const suggestedName = download.suggestedFilename();
+  // Reuse the authenticated cookies without navigating into Chrome's download handler.
+  const response = await page.context().request.get(exportUrl, { timeout: 60 * 1000 });
+  if (!response.ok()) {
+    throw new Error(`엑셀 다운로드 요청 실패: HTTP ${response.status()}`);
+  }
+  const body = await response.body();
+  await response.dispose();
+  if (body.length < 4 || body[0] !== 0x50 || body[1] !== 0x4b) {
+    throw new Error("엑셀 대신 다른 응답을 받았습니다. 로그인 상태를 확인하세요.");
+  }
+  const suggestedName = `주간업무보고 - ${new Date().toISOString().replace(/:/g, "").replace(/Z$/, "")}.xlsx`;
   const targetPath = getUniqueDownloadPath(DOWNLOAD_DIR, suggestedName);
-  await download.saveAs(targetPath);
+  fs.writeFileSync(targetPath, body);
   await validateDownloadedWorkbook(targetPath, start, end);
   if (DOWNLOAD_RESULT_PATH) {
     fs.mkdirSync(path.dirname(DOWNLOAD_RESULT_PATH), { recursive: true });
