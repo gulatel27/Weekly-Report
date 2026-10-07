@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-set PYTHON_EXE=C:\Users\JacksonL\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe
+set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
 
 if "%~1"=="" (
   echo Usage: run-apply-to-sharepoint.bat "C:\path\to\sharepoint-weekly-report.xlsx" ["C:\path\to\generated-report.xlsx"]

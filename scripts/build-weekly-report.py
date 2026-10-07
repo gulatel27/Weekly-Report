@@ -17,7 +17,10 @@ from openpyxl.styles import Border, Side
 KEEP_SHEETS = ["DS-2팀"]
 TEAM_NAME = "DS 2T"
 TEMPLATE_GLOB = "락플레이스-지원부문_주간보고_*.xlsx"
-DOWNLOADS_DIR = Path("D:/Downloads")
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+TEMPLATE_DIR = PROJECT_DIR / "Template"
+OUTPUTS_DIR = PROJECT_DIR / "outputs"
+DOWNLOADS_DIR = Path(os.environ.get("DOWNLOAD_DIR") or "D:/Downloads")
 DEFAULT_LLM_CONFIG = Path("config/llm.local.json")
 TIME_LABELS = ["주간", "야간", "심야", "휴일", "총합계"]
 KIND_LABELS = ["설치", "지원", "점검", "Presales", "파견"]
@@ -95,12 +98,12 @@ def load_llm_config(config_path: Path | None = None) -> dict | None:
 
 def find_latest_template() -> Path:
     candidates = sorted(
-        DOWNLOADS_DIR.glob(TEMPLATE_GLOB),
+        TEMPLATE_DIR.glob(TEMPLATE_GLOB),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if not candidates:
-        raise FileNotFoundError(f"템플릿 파일을 찾지 못했습니다: {DOWNLOADS_DIR / TEMPLATE_GLOB}")
+        raise FileNotFoundError(f"템플릿 파일을 찾지 못했습니다: {TEMPLATE_DIR / TEMPLATE_GLOB}")
     return candidates[0]
 
 
@@ -277,7 +280,8 @@ def build_blank_report(template_path: Path):
         if sheet_name not in KEEP_SHEETS:
             del wb[sheet_name]
     ws = wb["DS-2팀"]
-    ws["A4"] = '= "보고일자 " & TEXT(NOW(), "yyyy-mm-dd")'
+    report_date = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
+    ws["A4"] = f"보고일자 {report_date:%Y-%m-%d}"
     set_sheet_zoom(ws)
     blank_report_sheet(ws)
     normalize_section_title_numbers(ws)
@@ -1482,8 +1486,7 @@ def main() -> int:
     if start_date is None or end_date is None:
         raise ValueError("시작일/종료일은 YYYY-MM-DD 형식이어야 합니다.")
     output_path = args.output or (
-        Path.cwd()
-        / "outputs"
+        OUTPUTS_DIR
         / f"락플레이스-DS2_주간보고_{end_date.strftime('%Y%m%d')}.xlsx"
     )
     output_path = prepare_output_path(output_path)

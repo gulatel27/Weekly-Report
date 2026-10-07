@@ -10,7 +10,7 @@ from openpyxl.cell.cell import MergedCell
 
 
 DEFAULT_SHEET_NAME = "DS-2팀"
-OUTPUTS_DIR = Path("outputs")
+OUTPUTS_DIR = Path(__file__).resolve().parent.parent / "outputs"
 
 
 def log(message: str) -> None:

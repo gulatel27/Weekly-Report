@@ -97,6 +97,9 @@ async function waitUntilMainMenuVisible(page) {
     await page.getByText("통계", { exact: true }).waitFor({ timeout: ACTION_TIMEOUT_MS });
     return;
   } catch {
+    if (HEADLESS) {
+      throw new Error("로그인 상태를 확인하지 못했습니다. 현재 실행을 종료한 뒤 run-download.bat으로 브라우저를 열어 회사 계정 로그인을 완료하고 다시 실행하세요.");
+    }
     log("통계 메뉴가 아직 보이지 않습니다. 로그인이 필요하면 브라우저에서 로그인해 주세요.");
   }
   await page.getByText("통계", { exact: true }).waitFor({ timeout: LOGIN_WAIT_MS });

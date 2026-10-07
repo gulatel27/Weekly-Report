@@ -42,9 +42,11 @@ run-final.bat
 
 ```bat
 npm install
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-최종 주간보고 템플릿 파일은 기본적으로 `D:\Downloads`에서 아래 패턴으로 찾습니다.
+최종 주간보고 템플릿 파일은 기본적으로 프로젝트의 `Template` 폴더에서 아래 패턴으로 찾습니다.
 
 ```text
 락플레이스-지원부문_주간보고_*.xlsx

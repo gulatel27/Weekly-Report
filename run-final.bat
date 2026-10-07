@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-set PYTHON_EXE=C:\Users\JacksonL\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe
+set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
 set DATE_ENV_FILE=logs\report-dates.cmd
 
 if not exist "logs" mkdir logs
@@ -27,7 +27,7 @@ if not exist "node_modules\playwright" (
 )
 
 echo [1/3] Rockpaper weekly report download...
-set HEADLESS=1
+if not defined HEADLESS set HEADLESS=0
 call npm run download
 if errorlevel 1 exit /b %errorlevel%
 

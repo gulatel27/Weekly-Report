@@ -23,13 +23,13 @@ npm install
 
 ## 3. 템플릿 파일 준비
 
-최종 주간보고 템플릿 파일을 `D:\Downloads`에 둡니다.
+최종 주간보고 템플릿 파일을 프로젝트의 `Template` 폴더에 둡니다.
 
 ```text
-D:\Downloads\락플레이스-지원부문_주간보고_YYYYMMDD.xlsx
+Template\락플레이스-지원부문_주간보고_YYYYMMDD.xlsx
 ```
 
-프로그램은 `D:\Downloads`에서 `락플레이스-지원부문_주간보고_*.xlsx` 패턴의 최신 파일을 템플릿으로 사용합니다.
+프로그램은 프로젝트의 `Template` 폴더에서 `락플레이스-지원부문_주간보고_*.xlsx` 패턴의 최신 파일을 템플릿으로 사용합니다.
 
 ## 4. LLM 설정
 

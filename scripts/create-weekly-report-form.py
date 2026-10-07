@@ -10,7 +10,8 @@ from openpyxl.cell.cell import MergedCell
 
 
 KEEP_SHEETS = ["DS-2팀"]
-DOWNLOADS_DIR = Path("D:/Downloads")
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+TEMPLATE_DIR = PROJECT_DIR / "Template"
 DEFAULT_TEMPLATE_GLOB = "락플레이스-지원부문_주간보고_*.xlsx"
 
 
@@ -27,13 +28,13 @@ def this_week_range(today: dt.date | None = None) -> tuple[dt.date, dt.date]:
 
 def find_latest_template() -> Path:
     candidates = sorted(
-        DOWNLOADS_DIR.glob(DEFAULT_TEMPLATE_GLOB),
+        TEMPLATE_DIR.glob(DEFAULT_TEMPLATE_GLOB),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if not candidates:
         raise FileNotFoundError(
-            f"템플릿 파일을 찾지 못했습니다: {DOWNLOADS_DIR / DEFAULT_TEMPLATE_GLOB}"
+            f"템플릿 파일을 찾지 못했습니다: {TEMPLATE_DIR / DEFAULT_TEMPLATE_GLOB}"
         )
     return candidates[0]
 
@@ -191,7 +192,8 @@ def build_form(template_path: Path, output_path: Path) -> Path:
             del wb[sheet_name]
 
     for sheet_name in KEEP_SHEETS:
-        wb[sheet_name]["A4"] = '= "보고일자 " & TEXT(NOW(), "yyyy-mm-dd")'
+        report_date = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
+        wb[sheet_name]["A4"] = f"보고일자 {report_date:%Y-%m-%d}"
         set_sheet_zoom(wb[sheet_name])
         blank_report_sheet(wb[sheet_name])
         normalize_section_title_numbers(wb[sheet_name])
@@ -206,7 +208,7 @@ def build_form(template_path: Path, output_path: Path) -> Path:
 def parse_args() -> argparse.Namespace:
     monday, sunday = this_week_range()
     default_output = (
-        Path.cwd()
+        PROJECT_DIR
         / "outputs"
         / f"락플레이스-DS2_주간보고_빈폼_{sunday.strftime('%Y%m%d')}.xlsx"
     )
